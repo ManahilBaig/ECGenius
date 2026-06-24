@@ -34,7 +34,7 @@ The schema is **session-based**: each ECG recording is one **session**; raw samp
 | is_active | BOOLEAN | Default true. |
 | created_at | DATETIME | Creation time. |
 
-**Role:** Authentication and ownership of sessions. `ecg_sessions.user_id` can be NULL for anonymous/mock use.
+**Role:** Authentication and ownership of sessions. `ecg_sessions.user_id` can be NULL for anonymous app recordings.
 
 ---
 
@@ -46,10 +46,12 @@ The schema is **session-based**: each ECG recording is one **session**; raw samp
 | user_id | INTEGER FK(users) | Optional. |
 | name | VARCHAR(255) | e.g. "Morning reading". |
 | sampling_rate_hz | FLOAT | 250–360 for AD8232. |
-| source | VARCHAR(50) | `mock`, `esp32_http`, `esp32_websocket`, `esp32_mqtt`. |
+| source | VARCHAR(50) | `app`, `uploaded`, `esp32_http`, `esp32_websocket`, `esp32_mqtt`. |
 | started_at | DATETIME | When recording started. |
 | ended_at | DATETIME | When ended (nullable if still recording). |
 | total_duration_seconds | FLOAT | Total length of ECG. |
+| bpm | FLOAT | Final BPM saved when the session is completed. |
+| symptoms | TEXT | Optional symptoms entered by the patient. |
 | status | VARCHAR(20) | `recording`, `completed`, `failed`. |
 
 **Role:** One row = one ECG recording session. Supports filtering by user, source, and time.

@@ -63,13 +63,13 @@ Create a new session (for chunked upload).
 {
   "name": "Morning reading",
   "sampling_rate_hz": 360,
-  "source": "mock"
+  "source": "app"
 }
 ```
 
-`source`: `mock` | `esp32_http` | `esp32_websocket` | `esp32_mqtt`.
+`source`: `app` | `uploaded` | `esp32_http` | `esp32_websocket` | `esp32_mqtt`.
 
-**Response:** `ECGSessionOut` (id, user_id, name, sampling_rate_hz, source, started_at, ended_at, total_duration_seconds, status).
+**Response:** `ECGSessionOut` (id, user_id, name, sampling_rate_hz, source, started_at, ended_at, total_duration_seconds, bpm, symptoms, status).
 
 ---
 
@@ -77,7 +77,7 @@ Create a new session (for chunked upload).
 
 List sessions.
 
-**Query:** `skip`, `limit` (default 50, max 200).
+**Query:** `skip`, `limit` (optional).
 
 **Response:** `[ECGSessionOut]`.
 
@@ -91,9 +91,28 @@ Get one session.
 
 ---
 
+### POST `/ecg/sessions/{session_id}/complete`
+
+Finalize an ECG session after recording. Stores raw samples, processed BPM, duration, and optional symptoms.
+
+**Request:**
+
+```json
+{
+  "samples": [0.1, -0.05, ...],
+  "final_bpm": 72,
+  "total_duration_seconds": 15.0,
+  "symptoms": "Chest tightness"
+}
+```
+
+**Response:** `ECGSessionOut`.
+
+---
+
 ### POST `/ecg/upload-chunk`
 
-Append a chunk of ECG (ESP32 or mock stream).
+Append a chunk of ECG samples.
 
 **Request:**
 
@@ -123,7 +142,7 @@ Append a chunk of ECG (ESP32 or mock stream).
 
 ### POST `/ecg/upload-bulk`
 
-Create a session, store samples, run processing, and create alerts. For mock/batch or when ESP32 sends a full buffer.
+Create a session, store samples, run processing, and create alerts for a full ECG buffer.
 
 **Request:**
 
@@ -213,22 +232,6 @@ List alerts.
 
 ---
 
-### GET `/ecg/mock/sample`
-
-Mock ECG for testing (from MIT-BIH–style CSV or synthetic).
-
-**Response:**
-
-```json
-{
-  "samples": [0.1, -0.05, ...],
-  "sampling_rate_hz": 360
-}
-```
-
-Use with `POST /ecg/upload-bulk` or to build chunked `POST /ecg/upload-chunk` requests.
-
----
 
 ## Error Responses
 

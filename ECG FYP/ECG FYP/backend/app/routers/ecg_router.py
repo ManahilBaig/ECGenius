@@ -3,8 +3,9 @@ ECG REST API: uploads, sessions, waveform, health status, results, alerts.
 """
 
 import numpy as np
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.models.database import ECGSession, ECGReading, ProcessedResult, Alert
@@ -12,6 +13,7 @@ from app.models.schemas import (
     ECGChunkUpload,
     ECGBulkUpload,
     ECGSessionCreate,
+    ECGSessionComplete,
     ECGSessionOut,
     ProcessedResultOut,
     HealthStatusOut,
@@ -19,9 +21,8 @@ from app.models.schemas import (
     WaveformPoint,
     AlertOut,
 )
-from app.services.ecg_processor import process_ecg, AbnormalityType
+from app.services.ecg_processor import process_ecg
 from app.services.alert_service import create_alert_if_abnormal
-from app.services.mock_data_service import load_ecg_from_csv
 from app.services.ml_service import ml_service
 from app.services.ecg_feature_extraction import extract_ml_features, extract_segment_features_from_waveform
 from app.config import get_settings
@@ -69,10 +70,13 @@ async def create_session(
 @router.get("/sessions", response_model=list[ECGSessionOut])
 async def list_sessions(
     skip: int = 0,
-    limit: int = Query(50, le=200),
+    limit: int | None = Query(None, ge=1),
     db: AsyncSession = Depends(get_db),
 ):
-    r = await db.execute(select(ECGSession).order_by(ECGSession.started_at.desc()).offset(skip).limit(limit))
+    query = select(ECGSession).order_by(ECGSession.started_at.desc()).offset(skip)
+    if limit is not None:
+        query = query.limit(limit)
+    r = await db.execute(query)
     return list(r.scalars().all())
 
 
@@ -89,13 +93,67 @@ async def delete_session(session_id: int, db: AsyncSession = Depends(get_db)):
     return {"message": f"Session {session_id} deleted"}
 
 
+@router.post("/sessions/{session_id}/complete", response_model=ECGSessionOut)
+async def complete_session(
+    session_id: int,
+    data: ECGSessionComplete,
+    db: AsyncSession = Depends(get_db),
+):
+    sess = await _get_or_404_session(session_id, db)
+    await db.execute(delete(ECGReading).where(ECGReading.session_id == session_id))
+    await db.execute(delete(ProcessedResult).where(ProcessedResult.session_id == session_id))
+    await db.execute(delete(Alert).where(Alert.session_id == session_id))
+
+    reading = ECGReading(
+        session_id=session_id,
+        samples=data.samples,
+        chunk_index=0,
+        start_time_offset_ms=0,
+        sample_count=len(data.samples),
+    )
+    db.add(reading)
+
+    result = process_ecg(
+        data.samples,
+        sess.sampling_rate_hz,
+        _settings.ECG_BANDPASS_LOW,
+        _settings.ECG_BANDPASS_HIGH,
+        _settings.BRADYCARDIA_THRESHOLD,
+        _settings.TACHYCARDIA_THRESHOLD,
+    )
+    duration_seconds = data.total_duration_seconds or result.duration_seconds
+    saved_bpm = float(data.final_bpm)
+    processed = ProcessedResult(
+        session_id=session_id,
+        bpm=saved_bpm,
+        mean_rr_ms=result.mean_rr_ms,
+        rr_std_ms=result.rr_std_ms,
+        rr_intervals_ms=result.rr_intervals_ms,
+        abnormality=result.abnormality.value,
+        num_beats=result.num_beats,
+        duration_seconds=duration_seconds,
+    )
+    db.add(processed)
+    await create_alert_if_abnormal(db, session_id, result.abnormality, saved_bpm)
+
+    sess.bpm = saved_bpm
+    sess.symptoms = data.symptoms
+    sess.total_duration_seconds = duration_seconds
+    sess.ended_at = datetime.utcnow()
+    sess.status = "completed"
+
+    await db.commit()
+    await db.refresh(sess)
+    return sess
+
+
 # ---- Upload ----
 @router.post("/upload-chunk")
 async def upload_chunk(
     data: ECGChunkUpload,
     db: AsyncSession = Depends(get_db),
 ):
-    """Append a chunk of ECG samples (ESP32 or mock streaming)."""
+    """Append a chunk of ECG samples from the active recorder."""
     sess = await _get_or_404_session(data.session_id, db)
     rec = ECGReading(
         session_id=data.session_id,
@@ -116,13 +174,13 @@ async def upload_bulk(
 ):
     """
     Upload a full segment: creates a session, stores samples, runs processing,
-    saves result and alerts. Ideal for mock/batch or when ESP32 sends a full buffer.
+    saves result and alerts.
     """
     sess = ECGSession(
         user_id=data.user_id,
         name=data.session_name,
         sampling_rate_hz=data.sampling_rate_hz,
-        source="mock",
+        source="uploaded",
         status="completed",
     )
     db.add(sess)
@@ -224,6 +282,14 @@ async def get_health(session_id: int, db: AsyncSession = Depends(get_db)):
     rr = await db.execute(select(ECGReading).where(ECGReading.session_id == session_id).order_by(ECGReading.chunk_index))
     readings = list(rr.scalars().all())
     if not readings:
+        if sess.bpm is not None:
+            return HealthStatusOut(
+                bpm=sess.bpm,
+                status="recording",
+                num_beats=0,
+                duration_seconds=sess.total_duration_seconds or 0,
+                mean_rr_ms=None,
+            )
         raise HTTPException(404, "No ECG data to compute health status")
     raw = _gather_samples(sess, readings)
     res = process_ecg(
@@ -337,14 +403,6 @@ async def get_results(session_id: int, db: AsyncSession = Depends(get_db)):
         select(ProcessedResult).where(ProcessedResult.session_id == session_id).order_by(ProcessedResult.processed_at.desc())
     )
     return list(r.scalars().all())
-
-
-# ---- Mock data (for testing without hardware) ----
-@router.get("/mock/sample")
-async def get_mock_sample():
-    """Return mock ECG samples (from MIT-BIH–style CSV or synthetic) for upload-bulk/upload-chunk testing."""
-    samples, sr = load_ecg_from_csv()
-    return {"samples": samples, "sampling_rate_hz": sr}
 
 
 # ---- Alerts ----

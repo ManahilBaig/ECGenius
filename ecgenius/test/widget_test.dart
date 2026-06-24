@@ -1,30 +1,54 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+import 'package:ecgenius/ecg_screen.dart';
+import 'package:ecgenius/patient_session_history_screen.dart';
+import 'package:ecgenius/services/ecg_api_service.dart';
+import 'package:ecgenius/symptom_entry_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:ecgenius/main.dart';
-
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('ECG screen shows live BPM and countdown', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: ECGScreen(autoStart: false)),
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('ECG Screen'), findsOneWidget);
+    expect(find.text('Live BPM'), findsOneWidget);
+    expect(find.text('15 s left'), findsOneWidget);
+    expect(find.text('End Session'), findsNothing);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  testWidgets('Symptom screen owns End Session action', (tester) async {
+    final session = ECGSession(
+      id: 1,
+      name: 'Test ECG Session',
+      samplingRateHz: 360,
+      source: 'app',
+      status: 'recording',
+      startedAt: DateTime(2026),
+    );
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SymptomEntryScreen(
+          session: session,
+          ecgSamples: const [0.1, 0.2, 0.3],
+          finalBpm: 72,
+          totalDurationSeconds: 15,
+        ),
+      ),
+    );
+
+    expect(find.text('Symptom Entry Screen'), findsOneWidget);
+    expect(find.text('Symptoms (optional)'), findsOneWidget);
+    expect(find.text('End Session'), findsOneWidget);
+  });
+
+  testWidgets('History screen is the patient session history screen',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: PatientSessionHistoryScreen()),
+    );
+
+    expect(find.text('Patient Session History Screen'), findsOneWidget);
   });
 }
