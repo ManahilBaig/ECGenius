@@ -1,1 +1,1 @@
-"""Services for ECG processing, mock data, and alerts."""
+"""Services for ECG processing and alerts."""

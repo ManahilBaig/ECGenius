@@ -3,10 +3,13 @@ ML Service for ECG Classification using trained Random Forest model.
 """
 
 import os
-import joblib
 import numpy as np
 from typing import List, Dict, Any
-import pandas as pd
+
+try:
+    import joblib
+except ImportError:
+    joblib = None
 
 class MLService:
     def __init__(self):
@@ -21,7 +24,9 @@ class MLService:
             model_path = os.path.join(os.path.dirname(__file__), '../../../cardiac_ml/best_cardiac_model.pkl')
             scaler_path = os.path.join(os.path.dirname(__file__), '../../../cardiac_ml/scaler.pkl')
 
-            if os.path.exists(model_path) and os.path.exists(scaler_path):
+            if joblib is None:
+                print("joblib not installed; ML model loading skipped")
+            elif os.path.exists(model_path) and os.path.exists(scaler_path):
                 self.model = joblib.load(model_path)
                 self.scaler = joblib.load(scaler_path)
                 self.model_loaded = True
@@ -64,9 +69,13 @@ class MLService:
             feature_values = []
             for name in feature_names:
                 value = features.get(name, 0.0)
-                # Handle NaN values
-                if pd.isna(value):
+                if value is None:
                     value = 0.0
+                try:
+                    if np.isnan(value):
+                        value = 0.0
+                except TypeError:
+                    pass
                 feature_values.append(float(value))
 
             # Convert to numpy array and reshape

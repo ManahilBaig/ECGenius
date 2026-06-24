@@ -2,7 +2,7 @@
 ECG Monitoring System - FastAPI Application
 
 REST API for ECG upload, processing, BPM, health status, waveform, and alerts.
-Designed for mock data first; hardware-ready for ESP32 + AD8232.
+Designed for ECG session capture and hardware-ready ingestion from ESP32 + AD8232.
 """
 
 from contextlib import asynccontextmanager

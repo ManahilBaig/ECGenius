@@ -42,13 +42,15 @@ class ECGSession(Base):
     __tablename__ = "ecg_sessions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # nullable for mock/anonymous
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     name = Column(String(255), nullable=True)  # e.g., "Morning reading"
     sampling_rate_hz = Column(Float, nullable=False)  # 250–360 typical for AD8232
-    source = Column(String(50), default="mock")  # "mock" | "esp32_http" | "esp32_websocket" | "esp32_mqtt"
+    source = Column(String(50), default="app")
     started_at = Column(DateTime, default=datetime.utcnow)
     ended_at = Column(DateTime, nullable=True)
     total_duration_seconds = Column(Float, nullable=True)
+    bpm = Column(Float, nullable=True)
+    symptoms = Column(Text, nullable=True)
     status = Column(String(20), default="recording")  # recording | completed | failed
 
     user = relationship("User", back_populates="sessions")
@@ -61,7 +63,6 @@ class ECGReading(Base):
     """
     Raw ECG samples for a session.
     Stored in chunks to avoid enormous rows. Each chunk = a segment (e.g., 1–5 s of samples).
-    Simulates: ESP32 sends chunks via HTTP/WebSocket; we append here.
     """
     __tablename__ = "ecg_readings"
 

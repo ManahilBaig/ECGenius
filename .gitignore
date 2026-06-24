@@ -52,3 +52,6 @@ node_modules/
 # Virtual environments
 .venv/
 env/
+
+# Local databases
+*.db

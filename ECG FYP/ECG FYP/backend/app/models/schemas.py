@@ -7,9 +7,9 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
-# ---- ECG Data (simulates ESP32 / mock) ----
+# ---- ECG Data ----
 class ECGChunkUpload(BaseModel):
-    """Payload for uploading a chunk of ECG samples (ESP32 or mock streaming)."""
+    """Payload for uploading a chunk of ECG samples."""
     session_id: int
     samples: List[float] = Field(..., min_length=1, max_length=10000)
     chunk_index: int = Field(..., ge=0)
@@ -24,7 +24,7 @@ class ECGChunkUpload(BaseModel):
 
 
 class ECGBulkUpload(BaseModel):
-    """Upload a full segment of ECG for a new or existing session (mock/batch)."""
+    """Upload a full segment of ECG for a new or existing session."""
     samples: List[float] = Field(..., min_length=1, max_length=500_000)  # ~23 min @ 360 Hz
     sampling_rate_hz: float = Field(360.0, ge=100, le=1000)
     session_name: Optional[str] = None
@@ -35,7 +35,21 @@ class ECGBulkUpload(BaseModel):
 class ECGSessionCreate(BaseModel):
     name: Optional[str] = None
     sampling_rate_hz: float = Field(360.0, ge=100, le=1000)
-    source: str = Field("mock", pattern="^(mock|esp32_http|esp32_websocket|esp32_mqtt)$")
+    source: str = Field("app", pattern="^(app|uploaded|esp32_http|esp32_websocket|esp32_mqtt)$")
+
+
+class ECGSessionComplete(BaseModel):
+    samples: List[float] = Field(..., min_length=1, max_length=500_000)
+    final_bpm: float = Field(..., ge=0, le=300)
+    total_duration_seconds: Optional[float] = Field(None, gt=0)
+    symptoms: Optional[str] = None
+
+    @field_validator("samples")
+    @classmethod
+    def complete_samples_numeric(cls, v: List[float]) -> List[float]:
+        if any(not isinstance(x, (int, float)) for x in v):
+            raise ValueError("All samples must be numeric")
+        return [float(x) for x in v]
 
 
 class ECGSessionOut(BaseModel):
@@ -47,6 +61,8 @@ class ECGSessionOut(BaseModel):
     started_at: datetime
     ended_at: Optional[datetime]
     total_duration_seconds: Optional[float]
+    bpm: Optional[float]
+    symptoms: Optional[str]
     status: str
 
     class Config:

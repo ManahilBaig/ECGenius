@@ -1,80 +1,19 @@
-import 'dart:async';
-import 'dart:math' show Random, sin, pi;
 import 'package:flutter/material.dart';
 
-class ECGChart extends StatefulWidget {
+class ECGChart extends StatelessWidget {
   final bool monitoring;
-  const ECGChart({required this.monitoring, super.key});
+  final List<double> samples;
 
-  @override
-  State<ECGChart> createState() => _ECGChartState();
-}
-
-class _ECGChartState extends State<ECGChart> {
-  List<double> points = [];
-  Timer? timer;
-  final Random _random = Random();
-
-  @override
-  void didUpdateWidget(covariant ECGChart oldWidget) {
-    if (widget.monitoring && timer == null) {
-      timer = Timer.periodic(const Duration(milliseconds: 50), (_) {
-        setState(() {
-          // Generate ECG-like waveform
-          double value = _generateECGPoint(points.length);
-          points.add(value);
-          if (points.length > 200) points.removeAt(0);
-        });
-      });
-    } else if (!widget.monitoring) {
-      timer?.cancel();
-      timer = null;
-      if (points.isNotEmpty) {
-        setState(() {
-          points.clear();
-        });
-      }
-    }
-    super.didUpdateWidget(oldWidget);
-  }
-
-  double _generateECGPoint(int index) {
-    // Generate a more realistic ECG waveform
-    double x = index * 0.1;
-    double value = 0.0;
-
-    // P wave
-    if (x % 1.0 < 0.1) {
-      value = 0.3 * sin((x % 1.0) * 10 * pi);
-    }
-    // QRS complex
-    else if (x % 1.0 >= 0.1 && x % 1.0 < 0.2) {
-      double t = (x % 1.0 - 0.1) * 10;
-      value = -0.5 * sin(t * pi) + 1.5 * sin(t * 2 * pi);
-    }
-    // T wave
-    else if (x % 1.0 >= 0.2 && x % 1.0 < 0.4) {
-      double t = (x % 1.0 - 0.2) * 5;
-      value = 0.4 * sin(t * pi);
-    }
-    // Baseline with small noise
-    else {
-      value = 0.1 * _random.nextDouble() - 0.05;
-    }
-
-    return value;
-  }
-
-  @override
-  void dispose() {
-    timer?.cancel();
-    super.dispose();
-  }
+  const ECGChart({
+    required this.monitoring,
+    required this.samples,
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 220,
+      height: 240,
       decoration: BoxDecoration(
         color: Colors.black,
         borderRadius: BorderRadius.circular(16),
@@ -94,7 +33,7 @@ class _ECGChartState extends State<ECGChart> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                "ECG Waveform",
+                'ECG Waveform',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 18,
@@ -102,12 +41,10 @@ class _ECGChartState extends State<ECGChart> {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: widget.monitoring
+                  color: monitoring
                       ? Colors.red.withValues(alpha: 0.2)
                       : Colors.grey.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
@@ -118,15 +55,15 @@ class _ECGChartState extends State<ECGChart> {
                       width: 6,
                       height: 6,
                       decoration: BoxDecoration(
-                        color: widget.monitoring ? Colors.red : Colors.grey,
+                        color: monitoring ? Colors.red : Colors.grey,
                         shape: BoxShape.circle,
                       ),
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      widget.monitoring ? 'Recording' : 'Idle',
+                      monitoring ? 'Recording' : 'Recorded',
                       style: TextStyle(
-                        color: widget.monitoring ? Colors.red : Colors.grey,
+                        color: monitoring ? Colors.red : Colors.grey,
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
@@ -136,11 +73,13 @@ class _ECGChartState extends State<ECGChart> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           Expanded(
-            child: CustomPaint(
-              painter: ECGPainter(points),
-              child: Container(),
+            child: ClipRect(
+              child: CustomPaint(
+                painter: ECGPainter(samples: samples),
+                size: Size.infinite,
+              ),
             ),
           ),
         ],
@@ -150,69 +89,56 @@ class _ECGChartState extends State<ECGChart> {
 }
 
 class ECGPainter extends CustomPainter {
-  final List<double> points;
+  final List<double> samples;
 
-  ECGPainter(this.points);
+  ECGPainter({required this.samples});
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Draw grid
-    final gridPaint = Paint()
-      ..color = Colors.green.withValues(alpha: 0.1)
-      ..strokeWidth = 1.0;
-
-    for (int i = 0; i < size.width; i += 20) {
-      canvas.drawLine(
-        Offset(i.toDouble(), 0),
-        Offset(i.toDouble(), size.height),
-        gridPaint,
-      );
+    _drawGrid(canvas, size);
+    if (samples.length < 2) {
+      return;
     }
 
-    for (int i = 0; i < size.height; i += 20) {
-      canvas.drawLine(
-        Offset(0, i.toDouble()),
-        Offset(size.width, i.toDouble()),
-        gridPaint,
-      );
-    }
+    final path = Path();
+    final visibleSamples =
+        samples.length > 720 ? samples.sublist(samples.length - 720) : samples;
+    final dx = size.width / (visibleSamples.length - 1);
+    final midY = size.height / 2;
+    const amplitude = 42.0;
 
-    // Draw waveform
-    final wavePaint = Paint()
-      ..color = Colors.green
-      ..strokeWidth = 2.0
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    if (points.isNotEmpty) {
-      Path path = Path();
-      for (int i = 0; i < points.length; i++) {
-        final x = (i / points.length) * size.width;
-        final y = size.height / 2 - (points[i] * size.height / 4);
-
-        if (i == 0) {
-          path.moveTo(x, y);
-        } else {
-          path.lineTo(x, y);
-        }
+    for (var i = 0; i < visibleSamples.length; i++) {
+      final x = i * dx;
+      final y = midY - (visibleSamples[i] * amplitude);
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
       }
-      canvas.drawPath(path, wavePaint);
     }
 
-    // Draw center baseline
-    final baselinePaint = Paint()
-      ..color = Colors.green.withValues(alpha: 0.3)
-      ..strokeWidth = 1.0;
+    final paint = Paint()
+      ..color = Colors.greenAccent
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+    canvas.drawPath(path, paint);
+  }
 
-    canvas.drawLine(
-      Offset(0, size.height / 2),
-      Offset(size.width, size.height / 2),
-      baselinePaint,
-    );
+  void _drawGrid(Canvas canvas, Size size) {
+    final gridPaint = Paint()
+      ..color = Colors.green.withValues(alpha: 0.2)
+      ..strokeWidth = 0.5;
+
+    for (var x = 0.0; x < size.width; x += 20) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+    }
+    for (var y = 0.0; y < size.height; y += 20) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
   }
 
   @override
-  bool shouldRepaint(ECGPainter oldDelegate) {
-    return oldDelegate.points != points;
+  bool shouldRepaint(covariant ECGPainter oldDelegate) {
+    return true;
   }
 }

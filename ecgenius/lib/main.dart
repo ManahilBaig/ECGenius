@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'dashboard_screen.dart';
+import 'package:ecgenius/ecg_screen.dart';
 
 void main() {
   runApp(const ECGeniusApp());
@@ -10,9 +10,9 @@ class ECGeniusApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: DashboardScreen(),
+      home: ECGScreen(),
     );
   }
 }
