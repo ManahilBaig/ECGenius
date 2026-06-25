@@ -1,4 +1,4 @@
-import 'package:ecgenius/patient_session_history_screen.dart';
+import 'package:ecgenius/main_tab_controller.dart';
 import 'package:ecgenius/services/ecg_api_service.dart';
 import 'package:flutter/material.dart';
 
@@ -23,6 +23,8 @@ class SymptomEntryScreen extends StatefulWidget {
 class _SymptomEntryScreenState extends State<SymptomEntryScreen> {
   final ECGApi _api = ECGApi();
   final TextEditingController _symptomsController = TextEditingController();
+  
+  String? _selectedAgeRange;
   bool _isSaving = false;
   String? _errorMessage;
 
@@ -33,6 +35,13 @@ class _SymptomEntryScreenState extends State<SymptomEntryScreen> {
   }
 
   Future<void> _endSession() async {
+    if (_selectedAgeRange == null) {
+      setState(() {
+        _errorMessage = 'Please select your age range';
+      });
+      return;
+    }
+
     setState(() {
       _isSaving = true;
       _errorMessage = null;
@@ -51,7 +60,7 @@ class _SymptomEntryScreenState extends State<SymptomEntryScreen> {
       }
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
-            builder: (context) => const PatientSessionHistoryScreen()),
+            builder: (context) => const MainTabController(initialIndex: 1)),
         (route) => false,
       );
     } catch (e) {
@@ -65,9 +74,10 @@ class _SymptomEntryScreenState extends State<SymptomEntryScreen> {
     }
   }
 
-  String? get _normalizedSymptoms {
-    final text = _symptomsController.text.trim();
-    return text.isEmpty ? null : text;
+  String get _normalizedSymptoms {
+    final ageStr = _selectedAgeRange ?? 'Not specified';
+    final symptomsStr = _symptomsController.text.trim();
+    return 'Age Range: $ageStr\nSymptoms: $symptomsStr';
   }
 
   @override
@@ -94,6 +104,36 @@ class _SymptomEntryScreenState extends State<SymptomEntryScreen> {
                     children: [
                       _buildSummaryCard(),
                       const SizedBox(height: 24),
+                      
+                      // Age Range dropdown
+                      DropdownButtonFormField<String>(
+                        value: _selectedAgeRange,
+                        decoration: InputDecoration(
+                          labelText: 'Age Range (required)',
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          prefixIcon: const Icon(Icons.person_outline),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'Under 18', child: Text('Under 18')),
+                          DropdownMenuItem(value: '18-29', child: Text('18-29')),
+                          DropdownMenuItem(value: '30-44', child: Text('30-44')),
+                          DropdownMenuItem(value: '45-59', child: Text('45-59')),
+                          DropdownMenuItem(value: '60-74', child: Text('60-74')),
+                          DropdownMenuItem(value: '75+', child: Text('75+')),
+                        ],
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedAgeRange = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      
+                      // Symptoms TextField
                       TextField(
                         controller: _symptomsController,
                         minLines: 6,
@@ -111,11 +151,12 @@ class _SymptomEntryScreenState extends State<SymptomEntryScreen> {
                           ),
                         ),
                       ),
+                      
                       if (_errorMessage != null) ...[
                         const SizedBox(height: 16),
                         Text(
                           _errorMessage!,
-                          style: TextStyle(color: Colors.red[800]),
+                          style: TextStyle(color: Colors.red[800], fontWeight: FontWeight.bold),
                         ),
                       ],
                     ],

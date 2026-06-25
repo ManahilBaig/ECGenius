@@ -1,16 +1,17 @@
-import 'package:ecgenius/ecg_screen.dart';
 import 'package:ecgenius/services/ecg_api_service.dart';
+import 'package:ecgenius/session_details_screen.dart';
 import 'package:flutter/material.dart';
+import 'main_tab_controller.dart';
 
 class PatientSessionHistoryScreen extends StatefulWidget {
   const PatientSessionHistoryScreen({super.key});
 
   @override
   State<PatientSessionHistoryScreen> createState() =>
-      _PatientSessionHistoryScreenState();
+      PatientSessionHistoryScreenState();
 }
 
-class _PatientSessionHistoryScreenState
+class PatientSessionHistoryScreenState
     extends State<PatientSessionHistoryScreen> {
   final ECGApi _api = ECGApi();
   List<ECGSession> _sessions = [];
@@ -20,10 +21,10 @@ class _PatientSessionHistoryScreenState
   @override
   void initState() {
     super.initState();
-    _loadHistory();
+    loadHistory();
   }
 
-  Future<void> _loadHistory() async {
+  Future<void> loadHistory() async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -51,7 +52,7 @@ class _PatientSessionHistoryScreenState
   Future<void> _deleteSession(int sessionId) async {
     try {
       await _api.deleteSession(sessionId);
-      await _loadHistory();
+      await loadHistory();
       if (!mounted) {
         return;
       }
@@ -69,28 +70,22 @@ class _PatientSessionHistoryScreenState
   }
 
   void _startNewSession() {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (context) => const ECGScreen()),
-    );
+    final tabController = context.findAncestorStateOfType<MainTabControllerState>();
+    if (tabController != null) {
+      tabController.switchToTab(0);
+    } else {
+      // Fallback in case it's not nested
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (context) => const MainTabController(initialIndex: 0)),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        backgroundColor: const Color(0xFF1E40AF),
-        foregroundColor: Colors.white,
-        title: const Text('Patient Session History Screen'),
-        actions: [
-          IconButton(
-            onPressed: _loadHistory,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh sessions',
-          ),
-        ],
-      ),
+      appBar: null, // Managed by MainTabController
       body: SafeArea(child: _buildBody()),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _startNewSession,
@@ -116,7 +111,7 @@ class _PatientSessionHistoryScreenState
               Text(_errorMessage!, textAlign: TextAlign.center),
               const SizedBox(height: 16),
               ElevatedButton(
-                  onPressed: _loadHistory, child: const Text('Retry')),
+                  onPressed: loadHistory, child: const Text('Retry')),
             ],
           ),
         ),
@@ -148,7 +143,7 @@ class _PatientSessionHistoryScreenState
     }
 
     return RefreshIndicator(
-      onRefresh: _loadHistory,
+      onRefresh: loadHistory,
       child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(24, 24, 24, 96),
         itemCount: _sessions.length,
@@ -183,7 +178,15 @@ class _PatientSessionHistoryScreenState
         ),
         child: const Icon(Icons.delete, color: Colors.white),
       ),
-      child: Container(
+      child: GestureDetector(
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => SessionDetailsScreen(session: session),
+            ),
+          );
+        },
+        child: Container(
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
@@ -252,6 +255,7 @@ class _PatientSessionHistoryScreenState
               ),
             ],
           ],
+        ),
         ),
       ),
     );

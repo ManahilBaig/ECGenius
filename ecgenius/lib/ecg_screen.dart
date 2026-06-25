@@ -8,8 +8,13 @@ import 'package:flutter/material.dart';
 
 class ECGScreen extends StatefulWidget {
   final bool autoStart;
+  final ValueChanged<bool>? onRecordingStateChanged;
 
-  const ECGScreen({this.autoStart = true, super.key});
+  const ECGScreen({
+    this.autoStart = true,
+    this.onRecordingStateChanged,
+    super.key,
+  });
 
   @override
   State<ECGScreen> createState() => _ECGScreenState();
@@ -42,6 +47,9 @@ class _ECGScreenState extends State<ECGScreen> {
   @override
   void dispose() {
     _recordingTimer?.cancel();
+    if (_isRecording) {
+      widget.onRecordingStateChanged?.call(false);
+    }
     super.dispose();
   }
 
@@ -52,6 +60,7 @@ class _ECGScreenState extends State<ECGScreen> {
       _samples.clear();
       _secondsRemaining = recordingDuration.inSeconds;
       _bpm = 72;
+      _session = null;
     });
 
     try {
@@ -68,6 +77,7 @@ class _ECGScreenState extends State<ECGScreen> {
         _isStarting = false;
         _isRecording = true;
       });
+      widget.onRecordingStateChanged?.call(true);
       _stopwatch
         ..reset()
         ..start();
@@ -81,6 +91,7 @@ class _ECGScreenState extends State<ECGScreen> {
         _isRecording = false;
         _errorMessage = 'Unable to start ECG session: $e';
       });
+      widget.onRecordingStateChanged?.call(false);
     }
   }
 
@@ -141,6 +152,7 @@ class _ECGScreenState extends State<ECGScreen> {
     _recordingTimer?.cancel();
     _recordingTimer = null;
     _stopwatch.stop();
+    widget.onRecordingStateChanged?.call(false);
     if (!mounted || _session == null) {
       return;
     }
@@ -168,12 +180,7 @@ class _ECGScreenState extends State<ECGScreen> {
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF1E40AF),
-        foregroundColor: Colors.white,
-        title: const Text('ECG Screen'),
-        elevation: 0,
-      ),
+      appBar: null, // Unified AppBar is managed by MainTabController
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -188,11 +195,30 @@ class _ECGScreenState extends State<ECGScreen> {
               const SizedBox(height: 20),
               if (_errorMessage != null) _buildErrorCard(),
               if (_isStarting) const Center(child: CircularProgressIndicator()),
+              
+              if (!_isRecording && !_isStarting && _errorMessage == null) ...[
+                const SizedBox(height: 10),
+                ElevatedButton.icon(
+                  onPressed: _startRecording,
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('Start ECG Recording'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E40AF),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+              
               const SizedBox(height: 20),
               Text(
                 _isRecording
                     ? 'Recording will stop automatically after 15 seconds.'
-                    : 'Preparing the next step...',
+                    : (_isStarting ? 'Contacting server and starting session...' : 'Press Start to initiate ECG session.'),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.grey[700]),
               ),
@@ -224,7 +250,7 @@ class _ECGScreenState extends State<ECGScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                _isRecording ? 'Recording ECG' : 'Starting ECG',
+                _isRecording ? 'Recording ECG' : (_isStarting ? 'Starting ECG...' : 'ECG Idle'),
                 style: const TextStyle(
                   color: Color(0xFF1E3A8A),
                   fontSize: 20,
