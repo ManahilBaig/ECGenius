@@ -21,7 +21,7 @@ from app.models.schemas import (
     WaveformPoint,
     AlertOut,
 )
-from app.services.ecg_processor import process_ecg
+from app.services.ecg_processor import process_ecg, generate_demo_ecg
 from app.services.alert_service import create_alert_if_abnormal
 from app.services.ml_service import ml_service
 from app.services.ecg_feature_extraction import extract_ml_features, extract_segment_features_from_waveform
@@ -418,3 +418,25 @@ async def list_alerts(
         q = q.where(Alert.session_id == session_id)
     r = await db.execute(q.offset(skip).limit(limit))
     return list(r.scalars().all())
+
+
+# ---- Demo ----
+@router.get("/demo-ecg")
+async def get_demo_ecg():
+    """
+    Returns a realistic synthetic ECG signal for demo purposes.
+    ~5400 samples at 360 Hz (15 seconds) with random BPM and morphology.
+    """
+    bpm = float(np.random.choice([60, 72, 80, 90, 100]))
+    samples = generate_demo_ecg(
+        duration_seconds=15.0,
+        sampling_rate=360.0,
+        bpm=bpm,
+    )
+    return {
+        "samples": samples,
+        "sampling_rate_hz": 360.0,
+        "duration_seconds": 15.0,
+        "bpm": bpm,
+        "num_samples": len(samples),
+    }

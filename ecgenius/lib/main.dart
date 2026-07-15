@@ -1,10 +1,15 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:ecgenius/login_screen.dart';
 import 'package:ecgenius/main_tab_controller.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isAndroid) {
+    FlutterBluePlus.setLogLevel(LogLevel.verbose);
+  }
   runApp(const ECGeniusApp());
 }
 

@@ -1,6 +1,11 @@
+import 'dart:io';
 import 'package:ecgenius/services/ecg_api_service.dart';
 import 'package:ecgenius/widgets/ecg_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 class SessionDetailsScreen extends StatefulWidget {
   final ECGSession session;
@@ -16,11 +21,14 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
   List<double>? _waveformSamples;
   bool _isLoadingWaveform = true;
   String? _waveformError;
+  MlPrediction? _mlPrediction;
+  bool _isLoadingMl = true;
 
   @override
   void initState() {
     super.initState();
     _loadWaveform();
+    _loadMlPrediction();
   }
 
   Future<void> _loadWaveform() async {
@@ -37,6 +45,20 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
         _isLoadingWaveform = false;
         _waveformError = 'Could not load waveform: $e';
       });
+    }
+  }
+
+  Future<void> _loadMlPrediction() async {
+    try {
+      final prediction = await _api.getMlPrediction(widget.session.id);
+      if (!mounted) return;
+      setState(() {
+        _mlPrediction = prediction;
+        _isLoadingMl = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingMl = false);
     }
   }
 
@@ -82,6 +104,57 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
     return 'Normal';
   }
 
+  Future<void> _exportPdf() async {
+    final session = widget.session;
+    final parsed = _parseSymptomsField(session.symptoms);
+    final startedAt = session.startedAt.toLocal();
+
+    final pdf = pw.Document();
+    pdf.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(32),
+      build: (ctx) => [
+        pw.Header(level: 0, text: 'ECG Session Report', textStyle: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
+        pw.SizedBox(height: 16),
+        pw.Header(level: 1, text: 'Session Info'),
+        pw.Text('Session ID: ${session.id}'),
+        pw.Text('Name: ${session.name ?? 'N/A'}'),
+        pw.Text('Date: ${startedAt.year}-${startedAt.month.toString().padLeft(2, '0')}-${startedAt.day.toString().padLeft(2, '0')}'),
+        pw.Text('Time: ${startedAt.hour.toString().padLeft(2, '0')}:${startedAt.minute.toString().padLeft(2, '0')}'),
+        pw.Text('Duration: ${session.totalDurationSeconds?.toStringAsFixed(0) ?? 'Unknown'} seconds'),
+        pw.Text('Sample Rate: ${session.samplingRateHz.toStringAsFixed(0)} Hz'),
+        pw.Text('Source: ${session.source}'),
+        pw.Text('Status: ${session.status}'),
+        pw.SizedBox(height: 16),
+        pw.Header(level: 1, text: 'Vitals'),
+        pw.Text('BPM: ${session.bpm?.round().toString() ?? 'Pending'}'),
+        pw.SizedBox(height: 16),
+        pw.Header(level: 1, text: 'ML Classification'),
+        pw.Text('Result: ${_mlPrediction?.label ?? 'Not available'}'),
+        pw.Text('Confidence: ${_mlPrediction != null ? '${(_mlPrediction!.confidence * 100).toStringAsFixed(1)}%' : 'N/A'}'),
+        pw.SizedBox(height: 16),
+        pw.Header(level: 1, text: 'Patient Info'),
+        pw.Text('Age Range: ${parsed['ageRange']}'),
+        pw.Text('Symptoms: ${parsed['symptoms']}'),
+        pw.SizedBox(height: 16),
+        pw.Header(level: 1, text: 'Disclaimer'),
+        pw.Text('This report is for informational purposes only and does not constitute a medical diagnosis. Consult a healthcare professional for interpretation.'),
+      ],
+    ));
+
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/ECG_Session_${session.id}.pdf');
+    await file.writeAsBytes(await pdf.save());
+
+    if (!mounted) return;
+    await Share.shareXFiles([XFile(file.path)], text: 'ECG Session Report');
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('PDF saved: ${file.path}')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
@@ -97,6 +170,13 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
         foregroundColor: Colors.white,
         title: Text(session.name ?? 'Session ${session.id}'),
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.picture_as_pdf),
+            tooltip: 'Export as PDF',
+            onPressed: _exportPdf,
+          ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -199,6 +279,15 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
                   ],
                 ),
               ),
+
+              // ML Prediction Card
+              if (_isLoadingMl)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 16),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (_mlPrediction != null)
+                _buildMlCard(_mlPrediction!),
 
               const SizedBox(height: 16),
 
@@ -369,6 +458,71 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMlCard(MlPrediction ml) {
+    final color = ml.prediction == 'NSR' ? Colors.green
+        : (ml.prediction == 'AFF' || ml.prediction == 'ARR' || ml.prediction == 'CHF')
+            ? Colors.red : Colors.orange;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.insights, color: color, size: 22),
+              const SizedBox(width: 10),
+              const Text('ML Classification',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(ml.label,
+                  style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Text(
+                  '${(ml.confidence * 100).toStringAsFixed(1)}% confidence',
+                  style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          if (ml.probabilities != null) ...[
+            const SizedBox(height: 12),
+            ...ml.probabilities!.entries.map((e) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                children: [
+                  SizedBox(width: 36, child: Text(e.key, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  Expanded(child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(value: e.value, backgroundColor: Colors.grey[200], color: color, minHeight: 6),
+                  )),
+                  const SizedBox(width: 6),
+                  SizedBox(width: 40, child: Text('${(e.value * 100).toStringAsFixed(0)}%', style: const TextStyle(fontSize: 11))),
+                ],
+              ),
+            )),
+          ],
         ],
       ),
     );

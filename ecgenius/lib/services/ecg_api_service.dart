@@ -4,6 +4,23 @@ import 'package:http/http.dart' as http;
 
 import '../config.dart';
 
+class AuthResult {
+  final String accessToken;
+  final String? email;
+  final String? fullName;
+
+  AuthResult({required this.accessToken, this.email, this.fullName});
+}
+
+class UserInfo {
+  final int id;
+  final String email;
+  final String? fullName;
+  final bool isActive;
+
+  UserInfo({required this.id, required this.email, this.fullName, required this.isActive});
+}
+
 class ECGSession {
   final int id;
   final String? name;
@@ -313,12 +330,59 @@ class ECGApi {
     );
   }
 
+  Future<List<double>> getDemoEcg() async {
+    final response = await httpClient
+        .get(Uri.parse('$baseUrl/ecg/demo-ecg'))
+        .timeout(AppConfig.apiTimeout);
+
+    _throwIfFailed(response, 'Failed to get demo ECG');
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return (data['samples'] as List).cast<double>();
+  }
+
   Future<void> deleteSession(int sessionId) async {
     final response = await httpClient
         .delete(Uri.parse('$baseUrl/ecg/sessions/$sessionId'))
         .timeout(AppConfig.apiTimeout);
 
     _throwIfFailed(response, 'Failed to delete session');
+  }
+
+  Future<AuthResult> login(String email, String password) async {
+    final response = await httpClient
+        .post(
+          Uri.parse('$baseUrl/auth/login'),
+          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+          body: {'username': email, 'password': password},
+        )
+        .timeout(AppConfig.apiTimeout);
+
+    _throwIfFailed(response, 'Login failed');
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return AuthResult(accessToken: data['access_token'] as String);
+  }
+
+  Future<UserInfo> register(String email, String password, {String? fullName}) async {
+    final response = await httpClient
+        .post(
+          Uri.parse('$baseUrl/auth/register'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'email': email,
+            'password': password,
+            'full_name': fullName,
+          }),
+        )
+        .timeout(AppConfig.apiTimeout);
+
+    _throwIfFailed(response, 'Registration failed');
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return UserInfo(
+      id: data['id'] as int,
+      email: data['email'] as String,
+      fullName: data['full_name'] as String?,
+      isActive: data['is_active'] as bool,
+    );
   }
 
   void _throwIfFailed(http.Response response, String message) {

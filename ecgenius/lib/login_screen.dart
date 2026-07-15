@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'main_tab_controller.dart';
+import 'signup_screen.dart';
+import 'services/ecg_api_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -69,56 +71,49 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       _errorMessage = null;
     });
 
-    // Simulate network delay
-    await Future.delayed(const Duration(milliseconds: 1200));
-
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
-    // Check credentials (mocking API auth success)
-    if (email == 'doctor@ecgenius.com' && (password == 'password123' || password == '••••••••')) {
+    try {
+      final api = ECGApi();
+      final result = await api.login(email, password);
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('remember_me', _rememberMe);
-      
+      await prefs.setString('access_token', result.accessToken);
+      await prefs.setString('user_email', email);
       if (_rememberMe) {
         await prefs.setString('saved_email', email);
-        await prefs.setString('saved_token', 'mock-jwt-token-xyz');
       } else {
         await prefs.remove('saved_email');
-        await prefs.remove('saved_token');
       }
-      
-      // Mark as currently logged in
       await prefs.setBool('is_logged_in', true);
 
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (context) => const MainTabController()),
       );
-    } else if (password.length >= 6) {
-      // For testing, allow any email/password >= 6 chars but warning/success
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('remember_me', _rememberMe);
-      
-      if (_rememberMe) {
-        await prefs.setString('saved_email', email);
-        await prefs.setString('saved_token', 'mock-jwt-token-xyz');
-      } else {
-        await prefs.remove('saved_email');
-        await prefs.remove('saved_token');
-      }
-      
-      await prefs.setBool('is_logged_in', true);
+    } catch (_) {
+      // Fallback to demo credentials offline
+      if (email == 'doctor@ecgenius.com' && password == 'password123') {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('remember_me', _rememberMe);
+        await prefs.setString('user_email', email);
+        if (_rememberMe) {
+          await prefs.setString('saved_email', email);
+        }
+        await prefs.setBool('is_logged_in', true);
 
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const MainTabController()),
-      );
-    } else {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Invalid email or password. Use doctor@ecgenius.com / password123';
-      });
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const MainTabController()),
+        );
+      } else {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Login failed. Use doctor@ecgenius.com / password123 offline, or ensure backend is running.';
+        });
+      }
     }
   }
 
@@ -383,13 +378,15 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                     ),
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SignupScreen())),
+                  child: Text("Don't have an account? Sign Up", style: TextStyle(color: Colors.blue[300], fontSize: 14)),
+                ),
+                const SizedBox(height: 12),
                 Text(
-                  'Demo credentials: doctor@ecgenius.com / password123',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.5),
-                    fontSize: 12,
-                  ),
+                  'Demo: doctor@ecgenius.com / password123',
+                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
                 ),
               ],
             ),

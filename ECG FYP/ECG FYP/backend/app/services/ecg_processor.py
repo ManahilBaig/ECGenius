@@ -45,6 +45,82 @@ class ECGProcessedResult:
     rr_std_ms: Optional[float] = None  # For irregularity detection
 
 
+def generate_demo_ecg(
+    duration_seconds: float = 15.0,
+    sampling_rate: float = 360.0,
+    bpm: float = 72.0,
+    seed: int | None = None,
+) -> List[float]:
+    """
+    Generate a realistic synthetic ECG signal with P-QRS-T complexes.
+    Uses a dynamical model based on coupled van der Pol oscillators.
+    Returns normalized samples in [-1, 1] range.
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    else:
+        np.random.seed(np.random.randint(0, 99999))
+
+    n_samples = int(duration_seconds * sampling_rate)
+    t = np.arange(n_samples) / sampling_rate
+
+    beat_interval = 60.0 / bpm
+    samples = np.zeros(n_samples)
+
+    # P-QRS-T template (normalized morphology)
+    # Each complex spans ~0.8 * beat_interval
+    beat_len = int(0.8 * beat_interval * sampling_rate)
+    beat_template = np.zeros(beat_len)
+    bp = np.arange(beat_len) / sampling_rate
+
+    # P wave (small bump, ~100ms)
+    p_center = int(0.12 * sampling_rate)
+    p_width = 0.04 * sampling_rate
+    beat_template[:p_center] = -0.15 * np.exp(-(((bp[:p_center] - 0.12) ** 2) / (2 * 0.015**2)))
+
+    # QRS complex (sharp spike, ~100ms)
+    qrs_center = int(0.22 * sampling_rate)
+    qrs_start = qrs_center - int(0.03 * sampling_rate)
+    qrs_end = qrs_center + int(0.04 * sampling_rate)
+    if qrs_end < beat_len:
+        # Q wave
+        beat_template[qrs_start:qrs_center] = -0.3 * np.sin(np.linspace(0, np.pi, qrs_center - qrs_start))
+        # R wave
+        r_end = min(qrs_center + int(0.03 * sampling_rate), beat_len)
+        beat_template[qrs_center:r_end] = 1.0 * np.sin(np.linspace(0, np.pi, r_end - qrs_center))
+        # S wave
+        s_end = min(qrs_center + int(0.06 * sampling_rate), beat_len)
+        beat_template[r_end:s_end] = -0.2 * np.sin(np.linspace(0, np.pi, s_end - r_end))
+
+    # T wave (broader bump, ~200ms)
+    t_center = int(0.45 * sampling_rate)
+    t_width = 0.08 * sampling_rate
+    if t_center < beat_len:
+        t_idx = np.arange(max(0, t_center - int(t_width)), min(beat_len, t_center + int(t_width)))
+        beat_template[t_idx] += 0.2 * np.exp(-(((np.arange(len(t_idx)) - len(t_idx) // 2) ** 2) / (2 * (len(t_idx) // 4) ** 2)))
+
+    # Tile beats across the full duration
+    beat_samples = beat_len
+    for i in range(n_samples):
+        beat_idx = i % beat_samples
+        samples[i] = beat_template[beat_idx]
+
+    # Add realistic noise: baseline wander (low freq) + muscle noise (high freq)
+    baseline = 0.05 * np.sin(2 * np.pi * 0.25 * t) + 0.03 * np.sin(2 * np.pi * 0.1 * t)
+    muscle_noise = 0.02 * np.random.randn(n_samples)
+    # Apply muscle noise through a lowpass to make it more realistic
+    b, a = butter(2, 50.0 / (sampling_rate / 2), btype='low')
+    muscle_noise = filtfilt(b, a, muscle_noise)
+
+    samples = samples + baseline + muscle_noise
+    # Normalize to [-1, 1]
+    mx = np.max(np.abs(samples))
+    if mx > 0:
+        samples = samples / mx
+
+    return samples.tolist()
+
+
 def _validate_input(ecg_raw: List[float], sampling_rate: float) -> None:
     """Validate ECG input. Raises ValueError on invalid/corrupted data."""
     if not ecg_raw or len(ecg_raw) < sampling_rate * 2:  # Min ~2 seconds

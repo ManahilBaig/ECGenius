@@ -35,7 +35,7 @@ class ECGBulkUpload(BaseModel):
 class ECGSessionCreate(BaseModel):
     name: Optional[str] = None
     sampling_rate_hz: float = Field(360.0, ge=100, le=1000)
-    source: str = Field("app", pattern="^(app|uploaded|esp32_http|esp32_websocket|esp32_mqtt)$")
+    source: str = Field("app", pattern="^(app|uploaded|esp32_http|esp32_websocket|esp32_mqtt|esp32_ble)$")
 
 
 class ECGSessionComplete(BaseModel):

@@ -21,8 +21,8 @@ class MLService:
     def _load_model(self):
         """Load the trained model and scaler from files."""
         try:
-            model_path = os.path.join(os.path.dirname(__file__), '../../../cardiac_ml/best_cardiac_model.pkl')
-            scaler_path = os.path.join(os.path.dirname(__file__), '../../../cardiac_ml/scaler.pkl')
+            model_path = os.path.join(os.path.dirname(__file__), '../../../../../cardiac_ml/best_cardiac_model.pkl')
+            scaler_path = os.path.join(os.path.dirname(__file__), '../../../../../cardiac_ml/scaler.pkl')
 
             if joblib is None:
                 print("joblib not installed; ML model loading skipped")

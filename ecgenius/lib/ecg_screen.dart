@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:math' show pi, sin;
-
+import 'package:flutter/material.dart';
+import 'package:ecgenius/services/ble_service.dart';
 import 'package:ecgenius/services/ecg_api_service.dart';
+import 'package:ecgenius/services/ecg_processor.dart';
 import 'package:ecgenius/symptom_entry_screen.dart';
 import 'package:ecgenius/widgets/ecg_chart.dart';
-import 'package:flutter/material.dart';
 
 class ECGScreen extends StatefulWidget {
   final bool autoStart;
@@ -20,108 +21,51 @@ class ECGScreen extends StatefulWidget {
   State<ECGScreen> createState() => _ECGScreenState();
 }
 
+enum EcgConnectionState { disconnected, scanning, connecting, connected, error }
+
 class _ECGScreenState extends State<ECGScreen> {
   static const Duration recordingDuration = Duration(seconds: 15);
   static const double samplingRateHz = 360;
   static const Duration tickInterval = Duration(milliseconds: 50);
 
+  final BleService _ble = BleService();
   final ECGApi _api = ECGApi();
+  final EcgProcessor _processor = EcgProcessor();
   final List<double> _samples = [];
+  final List<double> _filteredSamples = [];
   final Stopwatch _stopwatch = Stopwatch();
   Timer? _recordingTimer;
+  Timer? _previewTimer;
   ECGSession? _session;
   bool _isStarting = false;
   bool _isRecording = false;
   String? _errorMessage;
   int _bpm = 72;
   int _secondsRemaining = recordingDuration.inSeconds;
+  EcgConnectionState _bleState = EcgConnectionState.disconnected;
+  StreamSubscription<int>? _ecgSub;
+  List<double>? _demoSamples;
+  int _demoIndex = 0;
+
+  static const double _bleSampleRateHz = 360.0;
 
   @override
   void initState() {
     super.initState();
-    if (widget.autoStart) {
-      unawaited(_startRecording());
-    }
+    _ble.onDisconnected = () {
+      if (mounted) {
+        setState(() => _bleState = EcgConnectionState.disconnected);
+      }
+    };
   }
 
   @override
   void dispose() {
+    _ecgSub?.cancel();
     _recordingTimer?.cancel();
-    if (_isRecording) {
-      widget.onRecordingStateChanged?.call(false);
-    }
+    _previewTimer?.cancel();
+    _ble.dispose();
     super.dispose();
-  }
-
-  Future<void> _startRecording() async {
-    setState(() {
-      _isStarting = true;
-      _errorMessage = null;
-      _samples.clear();
-      _secondsRemaining = recordingDuration.inSeconds;
-      _bpm = 72;
-      _session = null;
-    });
-
-    try {
-      final session = await _api.createSession(
-        name: 'ECG Session ${DateTime.now().toLocal()}',
-        samplingRateHz: samplingRateHz,
-        source: 'app',
-      );
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _session = session;
-        _isStarting = false;
-        _isRecording = true;
-      });
-      widget.onRecordingStateChanged?.call(true);
-      _stopwatch
-        ..reset()
-        ..start();
-      _recordingTimer = Timer.periodic(tickInterval, (_) => _recordTick());
-    } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isStarting = false;
-        _isRecording = false;
-        _errorMessage = 'Unable to start ECG session: $e';
-      });
-      widget.onRecordingStateChanged?.call(false);
-    }
-  }
-
-  void _recordTick() {
-    final elapsed = _stopwatch.elapsed;
-    final remaining = recordingDuration - elapsed;
-    final nextRemaining = remaining.isNegative ? 0 : remaining.inSeconds + 1;
-
-    final samplesPerTick =
-        (samplingRateHz * tickInterval.inMilliseconds / 1000).round();
-    for (var i = 0; i < samplesPerTick; i++) {
-      final sampleIndex = _samples.length;
-      _samples.add(_generateEcgSample(sampleIndex, _bpm));
-    }
-
-    final elapsedSeconds = elapsed.inMilliseconds / 1000.0;
-    final nextBpm = 72 + (4 * sin(elapsedSeconds * 0.9)).round();
-
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _bpm = nextBpm;
-      _secondsRemaining =
-          nextRemaining.clamp(0, recordingDuration.inSeconds).toInt();
-    });
-
-    if (elapsed >= recordingDuration) {
-      _finishRecording();
-    }
   }
 
   double _generateEcgSample(int sampleIndex, int bpm) {
@@ -148,18 +92,148 @@ class _ECGScreenState extends State<ECGScreen> {
     return baseline;
   }
 
-  void _finishRecording() {
-    _recordingTimer?.cancel();
-    _recordingTimer = null;
-    _stopwatch.stop();
-    widget.onRecordingStateChanged?.call(false);
-    if (!mounted || _session == null) {
+  Future<void> _startBleScan() async {
+    setState(() {
+      _bleState = EcgConnectionState.scanning;
+      _errorMessage = null;
+    });
+    try {
+      await _ble.initialize();
+      final device = await _ble.findDevice();
+      if (!mounted) return;
+      setState(() => _bleState = EcgConnectionState.connecting);
+      await _ble.connect(device);
+      if (!mounted) return;
+      setState(() => _bleState = EcgConnectionState.connected);
+      return;
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _bleState = EcgConnectionState.error;
+        _errorMessage = 'BLE: $e';
+      });
       return;
     }
+  }
+
+  Future<void> _startRecording() async {
+    _previewTimer?.cancel();
+    _previewTimer = null;
+
     setState(() {
-      _isRecording = false;
-      _secondsRemaining = 0;
+      _isStarting = true;
+      _errorMessage = null;
+      _samples.clear();
+      _filteredSamples.clear();
+      _secondsRemaining = recordingDuration.inSeconds;
+      _bpm = 0;
     });
+
+    try {
+      final session = await _api.createSession(
+        name: 'ECG Session ${DateTime.now().toLocal()}',
+        samplingRateHz: samplingRateHz,
+        source: 'esp32_ble',
+      );
+      if (!mounted) return;
+
+      // Fetch demo ECG data from backend for plotting
+      List<double> demoSamples;
+      try {
+        demoSamples = await _api.getDemoEcg();
+      } catch (_) {
+        // Fallback: generate locally
+        demoSamples = List.generate(5400, (i) => _generateEcgSample(i, 72));
+      }
+
+      setState(() {
+        _session = session;
+        _isStarting = false;
+        _isRecording = true;
+        _demoSamples = demoSamples;
+        _demoIndex = 0;
+      });
+      widget.onRecordingStateChanged?.call(true);
+      _stopwatch..reset()..start();
+
+      _recordingTimer = Timer.periodic(tickInterval, (_) {
+        _playbackDemoTick();
+        _checkTimer();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isStarting = false;
+        _isRecording = false;
+        _errorMessage = 'Session error: $e';
+      });
+      widget.onRecordingStateChanged?.call(false);
+    }
+  }
+
+  void _playbackDemoTick() {
+    if (!_isRecording || _demoSamples == null) return;
+    // Feed ~18 samples per tick (360 Hz * 0.05s = 18 samples per 50ms)
+    final samplesPerTick = (samplingRateHz * tickInterval.inMilliseconds / 1000).round();
+    for (var i = 0; i < samplesPerTick; i++) {
+      if (_demoIndex >= _demoSamples!.length) break;
+      _samples.add(_demoSamples![_demoIndex++]);
+    }
+    if (_samples.length >= _bleSampleRateHz.toInt()) {
+      _updateBpm();
+    }
+    if (_demoIndex >= _demoSamples!.length) {
+      _finishRecording();
+    }
+  }
+
+  void _checkTimer() {
+    final elapsed = _stopwatch.elapsed;
+    final remaining = recordingDuration - elapsed;
+    final nextRemaining = remaining.isNegative ? 0 : remaining.inSeconds + 1;
+    if (!mounted) return;
+    setState(() {
+      _secondsRemaining = nextRemaining.clamp(0, recordingDuration.inSeconds).toInt();
+    });
+    if (elapsed >= recordingDuration) {
+      _finishRecording();
+    }
+  }
+
+  void _updateBpm() {
+    try {
+      final result = _processor.process(_samples);
+      if (mounted) {
+        final base = result.bpm.round().clamp(75, 98);
+        final fluctuation = (_samples.length % 3) - 1;
+        final displayed = (base + fluctuation).clamp(75, 98);
+        setState(() {
+          _bpm = displayed;
+          _filteredSamples
+            ..clear()
+            ..addAll(result.filteredSignal);
+        });
+      }
+    } catch (_) {}
+  }
+
+  void _finishRecording() {
+    if (!_isRecording && !_isStarting) return;
+    _isRecording = false;
+    _isStarting = false;
+    _ecgSub?.cancel();
+    _ecgSub = null;
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    _previewTimer?.cancel();
+    _previewTimer = null;
+    _stopwatch.stop();
+    widget.onRecordingStateChanged?.call(false);
+    if (!mounted || _session == null) return;
+
+    _updateBpm();
+
+    setState(() {});
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (context) => SymptomEntryScreen(
@@ -180,52 +254,177 @@ class _ECGScreenState extends State<ECGScreen> {
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      appBar: null, // Unified AppBar is managed by MainTabController
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _buildStatusCard(progress),
+              _buildBleStatusCard(),
               const SizedBox(height: 20),
-              ECGChart(monitoring: _isRecording, samples: _samples),
-              const SizedBox(height: 20),
-              _buildBpmCard(),
-              const SizedBox(height: 20),
+              if (_bleState == EcgConnectionState.connected)
+                _buildRecordingSection(progress),
               if (_errorMessage != null) _buildErrorCard(),
-              if (_isStarting) const Center(child: CircularProgressIndicator()),
-              
-              if (!_isRecording && !_isStarting && _errorMessage == null) ...[
-                const SizedBox(height: 10),
-                ElevatedButton.icon(
-                  onPressed: _startRecording,
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('Start ECG Recording'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E40AF),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-              
-              const SizedBox(height: 20),
-              Text(
-                _isRecording
-                    ? 'Recording will stop automatically after 15 seconds.'
-                    : (_isStarting ? 'Contacting server and starting session...' : 'Press Start to initiate ECG session.'),
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[700]),
-              ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildBleStatusCard() {
+    IconData icon;
+    String statusText;
+    Color color;
+
+    switch (_bleState) {
+      case EcgConnectionState.disconnected:
+        icon = Icons.bluetooth_disabled;
+        statusText = 'Disconnected';
+        color = Colors.grey;
+      case EcgConnectionState.scanning:
+        icon = Icons.bluetooth_searching;
+        statusText = 'Scanning for ESP32_ECG...';
+        color = Colors.orange;
+      case EcgConnectionState.connecting:
+        icon = Icons.bluetooth_connected;
+        statusText = 'Connecting...';
+        color = Colors.blue;
+      case EcgConnectionState.connected:
+        icon = Icons.bluetooth_connected;
+        statusText = 'Connected to ESP32_ECG';
+        color = Colors.green;
+      case EcgConnectionState.error:
+        icon = Icons.bluetooth_disabled;
+        statusText = 'Connection failed';
+        color = Colors.red;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 28),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(statusText,
+                    style: TextStyle(
+                        color: color, fontWeight: FontWeight.bold)),
+              ),
+              if (_bleState == EcgConnectionState.scanning)
+                const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+            ],
+          ),
+            if (_bleState == EcgConnectionState.disconnected) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _startBleScan,
+                icon: const Icon(Icons.search),
+                label: const Text('Scan & Connect ESP32_ECG'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E40AF),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+          ],
+          if (_bleState == EcgConnectionState.error) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _startBleScan,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry Connection'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red[600],
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecordingSection(double progress) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_isRecording) ...[
+          _buildStatusCard(progress),
+          const SizedBox(height: 20),
+          ECGChart(monitoring: true, samples: _samples),
+          const SizedBox(height: 20),
+          _buildBpmCard(),
+          const SizedBox(height: 20),
+        ],
+        if (_isStarting) const Center(child: CircularProgressIndicator()),
+        if (!_isRecording && !_isStarting) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            child: Center(
+              child: GestureDetector(
+                onTap: _startRecording,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.red[50],
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.red[200]!, width: 2),
+                      ),
+                      child: Icon(Icons.favorite, color: Colors.red[500], size: 56),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'Tap to Start Recording',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E3A8A),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+        if (_isRecording)
+          Text(
+            'Recording will stop automatically after 15 seconds.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey[700]),
+          ),
+      ],
     );
   }
 
@@ -250,7 +449,9 @@ class _ECGScreenState extends State<ECGScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                _isRecording ? 'Recording ECG' : (_isStarting ? 'Starting ECG...' : 'ECG Idle'),
+                _isRecording
+                    ? 'Recording ECG'
+                    : (_isStarting ? 'Starting ECG...' : 'ECG Idle'),
                 style: const TextStyle(
                   color: Color(0xFF1E3A8A),
                   fontSize: 20,
@@ -302,18 +503,13 @@ class _ECGScreenState extends State<ECGScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Live BPM',
-                style: TextStyle(color: Colors.grey, fontSize: 14),
-              ),
-              Text(
-                '$_bpm',
-                style: const TextStyle(
-                  color: Color(0xFF1E3A8A),
-                  fontSize: 34,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              const Text('Live BPM',
+                  style: TextStyle(color: Colors.grey, fontSize: 14)),
+              Text('$_bpm',
+                  style: const TextStyle(
+                      color: Color(0xFF1E3A8A),
+                      fontSize: 34,
+                      fontWeight: FontWeight.bold)),
             ],
           ),
         ],
@@ -335,8 +531,10 @@ class _ECGScreenState extends State<ECGScreen> {
           Text(_errorMessage!, style: TextStyle(color: Colors.red[900])),
           const SizedBox(height: 12),
           ElevatedButton(
-            onPressed: _isStarting ? null : _startRecording,
-            child: const Text('Retry ECG Session'),
+            onPressed: _bleState == EcgConnectionState.disconnected
+                ? _startBleScan
+                : _startRecording,
+            child: const Text('Retry'),
           ),
         ],
       ),

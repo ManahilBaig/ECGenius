@@ -14,13 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.db.session import init_db
 from app.routers.ecg_router import router as ecg_router
-
-try:
-    from app.routers.auth_router import router as auth_router
-    _has_auth = True
-except ImportError:
-    _has_auth = False
-    print("WARNING: google-cloud-firestore not installed. Auth endpoints disabled.")
+from app.routers.auth_router import router as auth_router
 
 settings = get_settings()
 
@@ -56,8 +50,7 @@ async def value_error_handler(request: Request, exc: ValueError):
     )
 
 
-if _has_auth:
-    app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
+app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(ecg_router, prefix=settings.API_V1_PREFIX)
 
 

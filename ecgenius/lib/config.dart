@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 class AppConfig {
   static const String _definedBackendHost =
       String.fromEnvironment('ECG_BACKEND_HOST');
-  static const int backendPort = 8001;
+  static const int backendPort = 8000;
   static const String backendScheme = 'http';
 
   static String get backendHost {
