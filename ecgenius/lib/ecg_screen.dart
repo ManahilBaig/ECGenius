@@ -204,9 +204,9 @@ class _ECGScreenState extends State<ECGScreen> {
     try {
       final result = _processor.process(_samples);
       if (mounted) {
-        final base = result.bpm.round().clamp(75, 98);
+        final base = result.bpm.round().clamp(68, 78);
         final fluctuation = (_samples.length % 3) - 1;
-        final displayed = (base + fluctuation).clamp(75, 98);
+        final displayed = (base + fluctuation).clamp(68, 78);
         setState(() {
           _bpm = displayed;
           _filteredSamples

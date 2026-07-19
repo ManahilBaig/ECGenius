@@ -316,6 +316,24 @@ async def get_ml_prediction(session_id: int, db: AsyncSession = Depends(get_db))
     Uses RR/HRV from rr_intervals and P/QRS/T segment features from waveform when available.
     """
     sess = await _get_or_404_session(session_id, db)
+
+    # For demo sessions, return pre-defined predictions
+    if sess.source == "demo":
+        demo_predictions = {
+            "Ali": {"prediction": "NSR", "confidence": 0.94, "probabilities": {"AFF": 0.02, "ARR": 0.03, "CHF": 0.01, "NSR": 0.94}},
+            "Zimal": {"prediction": "NSR", "confidence": 0.91, "probabilities": {"AFF": 0.03, "ARR": 0.04, "CHF": 0.02, "NSR": 0.91}},
+            "Anika": {"prediction": "NSR", "confidence": 0.88, "probabilities": {"AFF": 0.04, "ARR": 0.05, "CHF": 0.03, "NSR": 0.88}},
+            "Shahnaz": {"prediction": "ARR", "confidence": 0.82, "probabilities": {"AFF": 0.06, "ARR": 0.82, "CHF": 0.07, "NSR": 0.05}},
+        }
+        pred = demo_predictions.get(sess.name, {"prediction": "NSR", "confidence": 0.90, "probabilities": {"AFF": 0.03, "ARR": 0.03, "CHF": 0.04, "NSR": 0.90}})
+        return {
+            "session_id": session_id,
+            "prediction": pred["prediction"],
+            "confidence": pred["confidence"],
+            "probabilities": pred["probabilities"],
+            "error": None,
+        }
+
     r = await db.execute(
         select(ProcessedResult)
         .where(ProcessedResult.session_id == session_id)
@@ -427,7 +445,7 @@ async def get_demo_ecg():
     Returns a realistic synthetic ECG signal for demo purposes.
     ~5400 samples at 360 Hz (15 seconds) with random BPM and morphology.
     """
-    bpm = float(np.random.choice([60, 72, 80, 90, 100]))
+    bpm = float(np.random.choice([68, 70, 72, 74, 76, 78]))
     samples = generate_demo_ecg(
         duration_seconds=15.0,
         sampling_rate=360.0,

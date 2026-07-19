@@ -104,6 +104,64 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
     return 'Normal';
   }
 
+  pw.Widget _buildEcgWaveformPdf(List<double> samples) {
+    if (samples.isEmpty) {
+      return pw.SizedBox(
+        height: 120,
+        child: pw.Center(child: pw.Text('No waveform data available')),
+      );
+    }
+
+    const double chartWidth = 530;
+    const double chartHeight = 160;
+    const double pad = 10;
+    const double drawW = chartWidth - 2 * pad;
+    const double drawH = chartHeight - 2 * pad;
+
+    final int n = samples.length;
+    final double minVal = samples.reduce((a, b) => a < b ? a : b);
+    final double maxVal = samples.reduce((a, b) => a > b ? a : b);
+    final double range = maxVal - minVal;
+    final double scaleY = range > 0 ? drawH / range : 1.0;
+
+    return pw.CustomPaint(
+      size: const PdfPoint(chartWidth, chartHeight),
+      painter: (PdfGraphics canvas, PdfPoint size) {
+        // Background
+        canvas.setFillColor(PdfColor.fromHex('#FAFAFA'));
+        canvas.drawRect(0, 0, size.x, size.y);
+        canvas.fillPath();
+
+        // Grid lines
+        canvas.setStrokeColor(PdfColor.fromHex('#E0E0E0'));
+        canvas.setLineWidth(0.3);
+        for (double gy = pad; gy <= pad + drawH; gy += 20) {
+          canvas.moveTo(pad, gy);
+          canvas.lineTo(pad + drawW, gy);
+        }
+        for (double gx = pad; gx <= pad + drawW; gx += 40) {
+          canvas.moveTo(gx, pad);
+          canvas.lineTo(gx, pad + drawH);
+        }
+        canvas.strokePath();
+
+        // ECG trace (y is flipped in PDF: bottom=0, so we invert)
+        canvas.setStrokeColor(PdfColor.fromHex('#1B5E20'));
+        canvas.setLineWidth(1.0);
+        for (int i = 0; i < n; i++) {
+          final double x = pad + (i / (n - 1)) * drawW;
+          final double y = pad + drawH - ((samples[i] - minVal) * scaleY);
+          if (i == 0) {
+            canvas.moveTo(x, y);
+          } else {
+            canvas.lineTo(x, y);
+          }
+        }
+        canvas.strokePath();
+      },
+    );
+  }
+
   Future<void> _exportPdf() async {
     final session = widget.session;
     final parsed = _parseSymptomsField(session.symptoms);
@@ -133,9 +191,15 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
         pw.Text('Result: ${_mlPrediction?.label ?? 'Not available'}'),
         pw.Text('Confidence: ${_mlPrediction != null ? '${(_mlPrediction!.confidence * 100).toStringAsFixed(1)}%' : 'N/A'}'),
         pw.SizedBox(height: 16),
+        pw.Header(level: 1, text: 'ECG Waveform'),
+        pw.SizedBox(height: 8),
+        _buildEcgWaveformPdf(_waveformSamples ?? []),
+        pw.SizedBox(height: 16),
         pw.Header(level: 1, text: 'Patient Info'),
         pw.Text('Age Range: ${parsed['ageRange']}'),
-        pw.Text('Symptoms: ${parsed['symptoms']}'),
+        pw.SizedBox(height: 4),
+        pw.Text('Symptoms:'),
+        pw.Text(parsed['symptoms'] ?? 'None recorded', style: const pw.TextStyle(height: 1.5)),
         pw.SizedBox(height: 16),
         pw.Header(level: 1, text: 'Disclaimer'),
         pw.Text('This report is for informational purposes only and does not constitute a medical diagnosis. Consult a healthcare professional for interpretation.'),
