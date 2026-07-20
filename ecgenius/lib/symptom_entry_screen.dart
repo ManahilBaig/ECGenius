@@ -1,6 +1,7 @@
 import 'package:ecgenius/main_tab_controller.dart';
 import 'package:ecgenius/services/ecg_api_service.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SymptomEntryScreen extends StatefulWidget {
   final ECGSession session;
@@ -36,6 +37,24 @@ class _SymptomEntryScreenState extends State<SymptomEntryScreen> {
     super.dispose();
   }
 
+  String? _patientName;
+  bool _isDoctor = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkDoctorAccount();
+  }
+
+  Future<void> _checkDoctorAccount() async {
+    final prefs = await SharedPreferences.getInstance();
+    final email = prefs.getString('user_email') ?? '';
+    if (!mounted) return;
+    setState(() {
+      _isDoctor = email == 'doctor@ecgenius.com';
+    });
+  }
+
   Future<void> _endSession() async {
     if (_selectedAgeRange == null) {
       setState(() {
@@ -51,6 +70,18 @@ class _SymptomEntryScreenState extends State<SymptomEntryScreen> {
       return;
     }
 
+    if (_isDoctor && (_patientName == null || _patientName!.trim().isEmpty)) {
+      final name = await _showPatientNameDialog();
+      if (name == null || name.trim().isEmpty) return;
+      setState(() => _patientName = name.trim());
+    } else if (!_isDoctor) {
+      final prefs = await SharedPreferences.getInstance();
+      final fullName = prefs.getString('user_name') ?? '';
+      if (fullName.isNotEmpty) {
+        _patientName = fullName;
+      }
+    }
+
     setState(() {
       _isSaving = true;
       _errorMessage = null;
@@ -63,6 +94,7 @@ class _SymptomEntryScreenState extends State<SymptomEntryScreen> {
         finalBpm: widget.finalBpm,
         totalDurationSeconds: widget.totalDurationSeconds,
         symptoms: _normalizedSymptoms(),
+        name: _patientName,
       );
       if (!mounted) return;
 
@@ -85,6 +117,42 @@ class _SymptomEntryScreenState extends State<SymptomEntryScreen> {
       if (!mounted) return;
       _showRetryDialog('Unable to save session. Please try again.');
     }
+  }
+
+  Future<String?> _showPatientNameDialog() async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enter Patient Name'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Patient name',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) {
+            if (v.trim().isNotEmpty) Navigator.of(ctx).pop(v.trim());
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (controller.text.trim().isNotEmpty) {
+                Navigator.of(ctx).pop(controller.text.trim());
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showRetryDialog(String message) {
@@ -130,7 +198,7 @@ class _SymptomEntryScreenState extends State<SymptomEntryScreen> {
     if (prediction == null) return Colors.grey;
     if (prediction == 'NSR') return Colors.green;
     if (prediction == 'AFF' || prediction == 'ARR' || prediction == 'CHF') {
-      return Colors.red;
+      return Colors.amber[700]!;
     }
     return Colors.orange;
   }

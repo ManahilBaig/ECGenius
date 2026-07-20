@@ -60,6 +60,7 @@ async def create_session(
         name=data.name,
         sampling_rate_hz=data.sampling_rate_hz,
         source=data.source,
+        created_by=data.created_by,
     )
     db.add(s)
     await db.commit()
@@ -71,9 +72,18 @@ async def create_session(
 async def list_sessions(
     skip: int = 0,
     limit: int | None = Query(None, ge=1),
+    user_email: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(ECGSession).order_by(ECGSession.started_at.desc()).offset(skip)
+    if user_email:
+        from sqlalchemy import or_
+        query = query.where(
+            or_(
+                ECGSession.created_by == user_email,
+                ECGSession.created_by.is_(None),
+            )
+        )
     if limit is not None:
         query = query.limit(limit)
     r = await db.execute(query)
@@ -141,6 +151,8 @@ async def complete_session(
     sess.total_duration_seconds = duration_seconds
     sess.ended_at = datetime.utcnow()
     sess.status = "completed"
+    if data.name:
+        sess.name = data.name
 
     await db.commit()
     await db.refresh(sess)

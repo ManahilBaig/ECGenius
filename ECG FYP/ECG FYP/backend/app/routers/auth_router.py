@@ -49,4 +49,4 @@ async def login(
     if not user or not verify_password(form.password, user.hashed_password):
         raise HTTPException(401, "Invalid email or password")
 
-    return Token(access_token=create_token(str(user.id)), token_type="bearer")
+    return Token(access_token=create_token(str(user.id)), token_type="bearer", full_name=user.full_name)

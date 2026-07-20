@@ -52,6 +52,7 @@ class ECGSession(Base):
     bpm = Column(Float, nullable=True)
     symptoms = Column(Text, nullable=True)
     status = Column(String(20), default="recording")  # recording | completed | failed
+    created_by = Column(String(255), nullable=True)  # user email who created this session
 
     user = relationship("User", back_populates="sessions")
     readings = relationship("ECGReading", back_populates="session", cascade="all, delete-orphan")

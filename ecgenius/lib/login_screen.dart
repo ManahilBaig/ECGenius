@@ -82,6 +82,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       await prefs.setBool('remember_me', _rememberMe);
       await prefs.setString('access_token', result.accessToken);
       await prefs.setString('user_email', email);
+      if (result.fullName != null) {
+        await prefs.setString('user_name', result.fullName!);
+      }
       if (_rememberMe) {
         await prefs.setString('saved_email', email);
       } else {
@@ -99,6 +102,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('remember_me', _rememberMe);
         await prefs.setString('user_email', email);
+        await prefs.setString('user_name', 'Doctor');
         if (_rememberMe) {
           await prefs.setString('saved_email', email);
         }

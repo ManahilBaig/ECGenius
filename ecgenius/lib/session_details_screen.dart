@@ -118,21 +118,25 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
     const double drawW = chartWidth - 2 * pad;
     const double drawH = chartHeight - 2 * pad;
 
-    final int n = samples.length;
-    final double minVal = samples.reduce((a, b) => a < b ? a : b);
-    final double maxVal = samples.reduce((a, b) => a > b ? a : b);
+    const int sr = 360;
+    const int fiveSeconds = sr * 5;
+    final List<double> display = samples.length > fiveSeconds
+        ? samples.sublist(0, fiveSeconds)
+        : samples;
+
+    final int n = display.length;
+    final double minVal = display.reduce((a, b) => a < b ? a : b);
+    final double maxVal = display.reduce((a, b) => a > b ? a : b);
     final double range = maxVal - minVal;
     final double scaleY = range > 0 ? drawH / range : 1.0;
 
     return pw.CustomPaint(
       size: const PdfPoint(chartWidth, chartHeight),
       painter: (PdfGraphics canvas, PdfPoint size) {
-        // Background
         canvas.setFillColor(PdfColor.fromHex('#FAFAFA'));
         canvas.drawRect(0, 0, size.x, size.y);
         canvas.fillPath();
 
-        // Grid lines
         canvas.setStrokeColor(PdfColor.fromHex('#E0E0E0'));
         canvas.setLineWidth(0.3);
         for (double gy = pad; gy <= pad + drawH; gy += 20) {
@@ -145,12 +149,11 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
         }
         canvas.strokePath();
 
-        // ECG trace (y is flipped in PDF: bottom=0, so we invert)
         canvas.setStrokeColor(PdfColor.fromHex('#1B5E20'));
         canvas.setLineWidth(1.0);
         for (int i = 0; i < n; i++) {
           final double x = pad + (i / (n - 1)) * drawW;
-          final double y = pad + drawH - ((samples[i] - minVal) * scaleY);
+          final double y = pad + drawH - ((display[i] - minVal) * scaleY);
           if (i == 0) {
             canvas.moveTo(x, y);
           } else {
@@ -160,6 +163,19 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
         canvas.strokePath();
       },
     );
+  }
+
+  String _symptomsForReport() {
+    final pred = _mlPrediction?.prediction;
+    if (pred == 'NSR') {
+      return 'No symptoms detected';
+    }
+    final parsed = _parseSymptomsField(widget.session.symptoms);
+    final userSymptoms = parsed['symptoms'] ?? 'None recorded';
+    if (userSymptoms == 'None' || userSymptoms == 'None recorded') {
+      return 'Possible arrhythmia detected — further clinical evaluation recommended.';
+    }
+    return userSymptoms;
   }
 
   Future<void> _exportPdf() async {
@@ -175,14 +191,11 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
         pw.Header(level: 0, text: 'ECG Session Report', textStyle: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
         pw.SizedBox(height: 16),
         pw.Header(level: 1, text: 'Session Info'),
-        pw.Text('Session ID: ${session.id}'),
-        pw.Text('Name: ${session.name ?? 'N/A'}'),
+        pw.Text('Patient: ${session.name ?? 'N/A'}'),
         pw.Text('Date: ${startedAt.year}-${startedAt.month.toString().padLeft(2, '0')}-${startedAt.day.toString().padLeft(2, '0')}'),
         pw.Text('Time: ${startedAt.hour.toString().padLeft(2, '0')}:${startedAt.minute.toString().padLeft(2, '0')}'),
         pw.Text('Duration: ${session.totalDurationSeconds?.toStringAsFixed(0) ?? 'Unknown'} seconds'),
         pw.Text('Sample Rate: ${session.samplingRateHz.toStringAsFixed(0)} Hz'),
-        pw.Text('Source: ${session.source}'),
-        pw.Text('Status: ${session.status}'),
         pw.SizedBox(height: 16),
         pw.Header(level: 1, text: 'Vitals'),
         pw.Text('BPM: ${session.bpm?.round().toString() ?? 'Pending'}'),
@@ -191,7 +204,7 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
         pw.Text('Result: ${_mlPrediction?.label ?? 'Not available'}'),
         pw.Text('Confidence: ${_mlPrediction != null ? '${(_mlPrediction!.confidence * 100).toStringAsFixed(1)}%' : 'N/A'}'),
         pw.SizedBox(height: 16),
-        pw.Header(level: 1, text: 'ECG Waveform'),
+        pw.Header(level: 1, text: 'ECG Waveform (5 seconds)'),
         pw.SizedBox(height: 8),
         _buildEcgWaveformPdf(_waveformSamples ?? []),
         pw.SizedBox(height: 16),
@@ -199,7 +212,7 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
         pw.Text('Age Range: ${parsed['ageRange']}'),
         pw.SizedBox(height: 4),
         pw.Text('Symptoms:'),
-        pw.Text(parsed['symptoms'] ?? 'None recorded', style: const pw.TextStyle(height: 1.5)),
+        pw.Text(_symptomsForReport(), style: const pw.TextStyle(height: 1.5)),
         pw.SizedBox(height: 16),
         pw.Header(level: 1, text: 'Disclaimer'),
         pw.Text('This report is for informational purposes only and does not constitute a medical diagnosis. Consult a healthcare professional for interpretation.'),
@@ -530,7 +543,7 @@ class _SessionDetailsScreenState extends State<SessionDetailsScreen> {
   Widget _buildMlCard(MlPrediction ml) {
     final color = ml.prediction == 'NSR' ? Colors.green
         : (ml.prediction == 'AFF' || ml.prediction == 'ARR' || ml.prediction == 'CHF')
-            ? Colors.red : Colors.orange;
+            ? Colors.amber[700]! : Colors.orange;
 
     return Container(
       padding: const EdgeInsets.all(18),

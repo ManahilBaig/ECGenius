@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' show pi, sin;
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ecgenius/services/ble_service.dart';
 import 'package:ecgenius/services/ecg_api_service.dart';
 import 'package:ecgenius/services/ecg_processor.dart';
@@ -130,10 +131,17 @@ class _ECGScreenState extends State<ECGScreen> {
     });
 
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final userEmail = prefs.getString('user_email') ?? '';
+      final isDoctor = userEmail == 'doctor@ecgenius.com';
+      final fullName = prefs.getString('user_name') ?? '';
+      final sessionName = isDoctor ? 'ECG Session' : fullName;
+
       final session = await _api.createSession(
-        name: 'ECG Session ${DateTime.now().toLocal()}',
+        name: sessionName.isNotEmpty ? sessionName : 'ECG Session ${DateTime.now().toLocal()}',
         samplingRateHz: samplingRateHz,
         source: 'esp32_ble',
+        createdBy: userEmail,
       );
       if (!mounted) return;
 

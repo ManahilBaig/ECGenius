@@ -1,6 +1,7 @@
 import 'package:ecgenius/services/ecg_api_service.dart';
 import 'package:ecgenius/session_details_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'main_tab_controller.dart';
 
 class PatientSessionHistoryScreen extends StatefulWidget {
@@ -30,7 +31,9 @@ class PatientSessionHistoryScreenState
       _errorMessage = null;
     });
     try {
-      final sessions = await _api.listSessions();
+      final prefs = await SharedPreferences.getInstance();
+      final userEmail = prefs.getString('user_email');
+      final sessions = await _api.listSessions(userEmail: userEmail);
       if (!mounted) {
         return;
       }

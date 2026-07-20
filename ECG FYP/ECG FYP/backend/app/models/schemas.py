@@ -36,6 +36,7 @@ class ECGSessionCreate(BaseModel):
     name: Optional[str] = None
     sampling_rate_hz: float = Field(360.0, ge=100, le=1000)
     source: str = Field("app", pattern="^(app|uploaded|esp32_http|esp32_websocket|esp32_mqtt|esp32_ble)$")
+    created_by: Optional[str] = None
 
 
 class ECGSessionComplete(BaseModel):
@@ -43,6 +44,7 @@ class ECGSessionComplete(BaseModel):
     final_bpm: float = Field(..., ge=0, le=300)
     total_duration_seconds: Optional[float] = Field(None, gt=0)
     symptoms: Optional[str] = None
+    name: Optional[str] = None
 
     @field_validator("samples")
     @classmethod
@@ -64,6 +66,7 @@ class ECGSessionOut(BaseModel):
     bpm: Optional[float]
     symptoms: Optional[str]
     status: str
+    created_by: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -125,6 +128,7 @@ class AlertOut(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    full_name: Optional[str] = None
 
 
 class UserCreate(BaseModel):

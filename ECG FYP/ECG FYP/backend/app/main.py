@@ -15,7 +15,6 @@ from app.config import get_settings
 from app.db.session import init_db, async_session
 from app.routers.ecg_router import router as ecg_router
 from app.routers.auth_router import router as auth_router
-from app.services.demo_seeder import seed_demo_sessions
 
 settings = get_settings()
 
@@ -23,8 +22,6 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    async with async_session() as db:
-        await seed_demo_sessions(db)
     yield
 
 

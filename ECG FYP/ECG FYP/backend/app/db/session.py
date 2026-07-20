@@ -27,6 +27,8 @@ async def init_db() -> None:
                 await conn.execute(text("ALTER TABLE ecg_sessions ADD COLUMN bpm FLOAT"))
             if "symptoms" not in existing_columns:
                 await conn.execute(text("ALTER TABLE ecg_sessions ADD COLUMN symptoms TEXT"))
+            if "created_by" not in existing_columns:
+                await conn.execute(text("ALTER TABLE ecg_sessions ADD COLUMN created_by VARCHAR(255)"))
 
 
 async def get_db() -> AsyncSession:

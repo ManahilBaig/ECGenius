@@ -32,6 +32,7 @@ class ECGSession {
   final double? totalDurationSeconds;
   final double? bpm;
   final String? symptoms;
+  final String? createdBy;
 
   ECGSession({
     required this.id,
@@ -44,6 +45,7 @@ class ECGSession {
     this.totalDurationSeconds,
     this.bpm,
     this.symptoms,
+    this.createdBy,
   });
 
   factory ECGSession.fromJson(Map<String, dynamic> json) {
@@ -61,6 +63,7 @@ class ECGSession {
           (json['total_duration_seconds'] as num?)?.toDouble(),
       bpm: (json['bpm'] as num?)?.toDouble(),
       symptoms: json['symptoms'] as String?,
+      createdBy: json['created_by'] as String?,
     );
   }
 }
@@ -209,6 +212,7 @@ class ECGApi {
     String? name,
     double samplingRateHz = AppConfig.samplingRateHz,
     String source = 'app',
+    String? createdBy,
   }) async {
     final response = await httpClient
         .post(
@@ -218,6 +222,7 @@ class ECGApi {
             'name': name,
             'sampling_rate_hz': samplingRateHz,
             'source': source,
+            'created_by': createdBy,
           }),
         )
         .timeout(AppConfig.apiTimeout);
@@ -233,6 +238,7 @@ class ECGApi {
     required int finalBpm,
     required double totalDurationSeconds,
     String? symptoms,
+    String? name,
   }) async {
     final response = await httpClient
         .post(
@@ -243,6 +249,7 @@ class ECGApi {
             'final_bpm': finalBpm,
             'total_duration_seconds': totalDurationSeconds,
             'symptoms': symptoms,
+            'name': name,
           }),
         )
         .timeout(AppConfig.largeFileTimeout);
@@ -252,9 +259,13 @@ class ECGApi {
         jsonDecode(response.body) as Map<String, dynamic>);
   }
 
-  Future<List<ECGSession>> listSessions({int skip = 0}) async {
+  Future<List<ECGSession>> listSessions({int skip = 0, String? userEmail}) async {
+    var url = '$baseUrl/ecg/sessions?skip=$skip';
+    if (userEmail != null) {
+      url += '&user_email=$userEmail';
+    }
     final response = await httpClient
-        .get(Uri.parse('$baseUrl/ecg/sessions?skip=$skip'))
+        .get(Uri.parse(url))
         .timeout(AppConfig.apiTimeout);
 
     _throwIfFailed(response, 'Failed to list sessions');
@@ -359,7 +370,10 @@ class ECGApi {
 
     _throwIfFailed(response, 'Login failed');
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return AuthResult(accessToken: data['access_token'] as String);
+    return AuthResult(
+      accessToken: data['access_token'] as String,
+      fullName: data['full_name'] as String?,
+    );
   }
 
   Future<UserInfo> register(String email, String password, {String? fullName}) async {
